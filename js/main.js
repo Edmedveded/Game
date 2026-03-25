@@ -29,69 +29,134 @@ let walls;
 let enemies;
 let targetedEnemy = null;
 let attackRange = 40;
+let targetMarker = null;
 
 function preload() {
-    // Load assets here later (images, spritesheets)
-    // For now, we will draw simple graphics
+    // Generate simple textures programmatically using Phaser's Graphics
+    const graphics = this.make.graphics();
+
+    // Floor Tile
+    graphics.fillStyle(0x3e3c38, 1);
+    graphics.fillRect(0, 0, 64, 64);
+    graphics.lineStyle(2, 0x2a2825, 1);
+    graphics.strokeRect(0, 0, 64, 64);
+    // Add some random details to the floor
+    graphics.fillStyle(0x302e2b, 1);
+    graphics.fillRect(10, 10, 8, 8);
+    graphics.fillRect(40, 30, 12, 6);
+    graphics.generateTexture('floor', 64, 64);
+    graphics.clear();
+
+    // Wall Tile
+    graphics.fillStyle(0x5a5650, 1);
+    graphics.fillRect(0, 0, 64, 64);
+    // Draw brick pattern
+    graphics.lineStyle(2, 0x1f1d1b, 1);
+    graphics.strokeRect(0, 0, 64, 64); // border
+    graphics.lineBetween(0, 32, 64, 32); // middle horizontal line
+    graphics.lineBetween(32, 0, 32, 32); // top vertical line
+    graphics.lineBetween(16, 32, 16, 64); // bottom vertical line 1
+    graphics.lineBetween(48, 32, 48, 64); // bottom vertical line 2
+    graphics.generateTexture('wall', 64, 64);
+    graphics.clear();
+
+    // Player (A simple character)
+    graphics.fillStyle(0x4287f5, 1); // Blue body
+    graphics.fillCircle(16, 16, 16);
+    // Simple face/direction indicator (lighter front)
+    graphics.fillStyle(0x9bc0ff, 1);
+    graphics.fillCircle(24, 16, 6);
+    graphics.generateTexture('player', 32, 32);
+    graphics.clear();
+
+    // Enemy (Goblin/Spider like)
+    graphics.fillStyle(0x2a7a3a, 1); // Green body
+    graphics.fillCircle(16, 16, 16);
+    // Red eyes
+    graphics.fillStyle(0xff0000, 1);
+    graphics.fillCircle(24, 10, 4);
+    graphics.fillCircle(24, 22, 4);
+    graphics.generateTexture('enemy', 32, 32);
+    graphics.clear();
+
+    // Target Indicator (X marks the spot)
+    graphics.lineStyle(2, 0xffffff, 0.8);
+    graphics.strokeCircle(16, 16, 12);
+    graphics.lineBetween(16, 0, 16, 8);
+    graphics.lineBetween(16, 24, 16, 32);
+    graphics.lineBetween(0, 16, 8, 16);
+    graphics.lineBetween(24, 16, 32, 16);
+    graphics.generateTexture('target', 32, 32);
+    graphics.clear();
+
+    // Attack Slash Effect
+    graphics.lineStyle(4, 0xffffff, 1);
+    graphics.beginPath();
+    graphics.arc(32, 32, 24, Phaser.Math.DegToRad(-45), Phaser.Math.DegToRad(45), false);
+    graphics.strokePath();
+    graphics.generateTexture('slash', 64, 64);
+    graphics.clear();
 }
 
 function create() {
-    // Create a simple floor grid
-    this.add.grid(400, 300, 800, 600, 32, 32, 0x444444, 1, 0x555555, 1);
+    // Create floor with repeating tiles
+    this.add.tileSprite(400, 300, 800, 600, 'floor');
 
     // Create walls group
     walls = this.physics.add.staticGroup();
 
-    // Create a simple dungeon room
-    const wallColor = 0x888888;
+    // Create a more interesting dungeon room shape using a simple map array
+    const levelMap = [
+        "WWWWWWWWWWWW",
+        "W..........W",
+        "W..WW..E...W",
+        "W..WW......W",
+        "W......W...W",
+        "W..P...W...W",
+        "WWWW.......W",
+        "W......E...W",
+        "WWWWWWWWWWWW"
+    ];
 
-    // Top wall
-    let wallTop = this.add.rectangle(400, 50, 700, 20, wallColor);
-    walls.add(wallTop);
+    const tileSize = 64;
+    const startX = 32;
+    const startY = 32;
 
-    // Bottom wall
-    let wallBottom = this.add.rectangle(400, 550, 700, 20, wallColor);
-    walls.add(wallBottom);
+    // Remove old enemies group init as we will do it below based on the map
+    enemies = this.physics.add.group();
 
-    // Left wall
-    let wallLeft = this.add.rectangle(50, 300, 20, 500, wallColor);
-    walls.add(wallLeft);
+    let playerSpawn = {x: 200, y: 300}; // Default fallback
 
-    // Right wall
-    let wallRight = this.add.rectangle(750, 300, 20, 500, wallColor);
-    walls.add(wallRight);
+    for (let row = 0; row < levelMap.length; row++) {
+        for (let col = 0; col < levelMap[row].length; col++) {
+            let char = levelMap[row][col];
+            let px = startX + col * tileSize;
+            let py = startY + row * tileSize;
 
-    // Obstacle inside the room
-    let obstacle = this.add.rectangle(400, 300, 100, 100, wallColor);
-    walls.add(obstacle);
+            if (char === 'W') {
+                walls.create(px, py, 'wall');
+            } else if (char === 'P') {
+                playerSpawn = {x: px, y: py};
+            } else if (char === 'E') {
+                let enemy = enemies.create(px, py, 'enemy');
+                enemy.body.setImmovable(true);
+                enemy.setCircle(16);
+                enemy.health = 3;
+                enemy.setRotation(Math.PI);
+            }
+        }
+    }
 
     // Basic setup for the first scene
-    this.add.text(10, 10, 'Fate Web - Prototype (Click to move)', { font: '16px Arial', fill: '#ffffff' }).setDepth(100);
+    this.add.text(10, 10, 'Fate Web - Prototype (Click to move/attack)', { font: '16px Arial', fill: '#ffffff' }).setDepth(100);
 
-    // Create the player (a simple circle for now)
-    // Start slightly offset to avoid the middle obstacle
-    player = this.add.circle(200, 300, 16, 0x00ff00);
-    this.physics.add.existing(player);
+    // Create the player at the spawn point determined by the map
+    player = this.physics.add.sprite(playerSpawn.x, playerSpawn.y, 'player');
     player.body.setCollideWorldBounds(true);
+    player.setCircle(16); // Better collision shape
 
     // Add collision between player and walls
     this.physics.add.collider(player, walls, handleWallCollision, null, this);
-
-    // Create enemies group
-    enemies = this.physics.add.group();
-
-    // Add a couple of placeholder enemies (red squares)
-    let enemy1 = this.add.rectangle(600, 150, 30, 30, 0xff0000);
-    this.physics.add.existing(enemy1);
-    enemy1.body.setImmovable(true);
-    enemy1.health = 3;
-    enemies.add(enemy1);
-
-    let enemy2 = this.add.rectangle(600, 450, 30, 30, 0xff0000);
-    this.physics.add.existing(enemy2);
-    enemy2.body.setImmovable(true);
-    enemy2.health = 3;
-    enemies.add(enemy2);
 
     // Collision between player and enemies
     this.physics.add.collider(player, enemies);
@@ -120,8 +185,25 @@ function create() {
             targetedEnemy = null;
         }
 
-        // Move towards target
+        // Show target marker
+        if (targetMarker) {
+            targetMarker.destroy();
+        }
+
+        targetMarker = this.add.sprite(targetPosition.x, targetPosition.y, 'target');
+        targetMarker.setDepth(10);
+
+        // Rotate the marker slightly over time
+        this.tweens.add({
+            targets: targetMarker,
+            angle: 90,
+            duration: 500,
+            repeat: -1
+        });
+
+        // Move towards target and rotate player
         this.physics.moveToObject(player, targetPosition, moveSpeed);
+        player.setRotation(Phaser.Math.Angle.Between(player.x, player.y, targetPosition.x, targetPosition.y));
     }, this);
 }
 
@@ -146,6 +228,10 @@ function update() {
                 player.body.reset(player.x, player.y);
                 isMoving = false;
                 targetPosition = null;
+                if(targetMarker) {
+                    targetMarker.destroy();
+                    targetMarker = null;
+                }
                 attackEnemy(targetedEnemy);
                 return;
             }
@@ -158,6 +244,10 @@ function update() {
             player.body.reset(targetPosition.x, targetPosition.y);
             isMoving = false;
             targetPosition = null;
+            if(targetMarker) {
+                targetMarker.destroy();
+                targetMarker = null;
+            }
         }
     }
 }
@@ -165,21 +255,65 @@ function update() {
 function attackEnemy(enemy) {
     if (!enemy || !enemy.active) return;
 
+    let scene = game.scene.scenes[0];
     enemy.health -= 1;
 
-    // Flash white to show damage
-    enemy.fillColor = 0xffffff;
+    // Calculate angle to enemy
+    let angleToEnemy = Phaser.Math.Angle.Between(player.x, player.y, enemy.x, enemy.y);
+    player.setRotation(angleToEnemy);
+
+    // Show Slash Effect
+    let slash = scene.add.sprite(
+        player.x + Math.cos(angleToEnemy) * 20,
+        player.y + Math.sin(angleToEnemy) * 20,
+        'slash'
+    );
+    slash.setRotation(angleToEnemy);
+    slash.setDepth(20);
+
+    // Animate slash
+    scene.tweens.add({
+        targets: slash,
+        alpha: 0,
+        scale: 1.5,
+        duration: 200,
+        onComplete: () => {
+            slash.destroy();
+        }
+    });
+
+    // Flash red to show damage
+    enemy.setTint(0xff0000);
 
     // Reset color after a short delay
-    game.scene.scenes[0].time.delayedCall(100, () => {
+    scene.time.delayedCall(100, () => {
         if (enemy.active) {
-            enemy.fillColor = 0xff0000;
+            enemy.clearTint();
         }
     });
 
     if (enemy.health <= 0) {
         // Enemy dies
-        enemy.destroy();
+
+        // Death animation (shrink and fade)
+        scene.tweens.add({
+            targets: enemy,
+            scale: 0.1,
+            alpha: 0,
+            angle: 180,
+            duration: 300,
+            onComplete: () => {
+                enemy.destroy();
+            }
+        });
         targetedEnemy = null;
+    } else {
+        // Knockback slightly
+        scene.tweens.add({
+            targets: enemy,
+            x: enemy.x + Math.cos(angleToEnemy) * 10,
+            y: enemy.y + Math.sin(angleToEnemy) * 10,
+            duration: 100
+        });
     }
 }
