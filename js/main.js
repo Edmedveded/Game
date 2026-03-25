@@ -1,15 +1,15 @@
-// Basic Phaser 3 Setup
+// Basic Phaser 3 Setup for Web Worms
 const config = {
     type: Phaser.AUTO,
     width: 800,
     height: 600,
     parent: 'game-container',
-    backgroundColor: '#333333',
+    backgroundColor: '#87CEEB', // Sky blue
     physics: {
         default: 'arcade',
         arcade: {
             debug: false,
-            gravity: { y: 0 } // Top-down view, so no gravity
+            gravity: { y: 600 } // Stronger gravity for worms
         }
     },
     scene: {
@@ -21,165 +21,252 @@ const config = {
 
 const game = new Phaser.Game(config);
 
-let player;
-let targetPosition = null;
-let isMoving = false;
-let moveSpeed = 150; // pixels per second
-let walls;
-let enemies;
-let targetedEnemy = null;
-let attackRange = 40;
+let terrainGroup;
+const blockSize = 10;
+let worms = [];
+let currentWormIndex = 0;
+let turnText;
+let healthTexts = [];
+
+// Artillery Mechanics
+let aimAngle = -Math.PI / 4; // Default aim up-right 45 deg
+let aimLine;
+let chargePower = 0;
+let isCharging = false;
+let maxCharge = 1000;
+let projectile = null;
+let powerText;
 
 function preload() {
-    // Load assets here later (images, spritesheets)
-    // For now, we will draw simple graphics
+    // Load assets here later
 }
 
 function create() {
-    // Create a simple floor grid
-    this.add.grid(400, 300, 800, 600, 32, 32, 0x444444, 1, 0x555555, 1);
+    // Setup inputs
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.spacebar = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.wKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W);
+    this.sKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
 
-    // Create walls group
-    walls = this.physics.add.staticGroup();
+    terrainGroup = this.physics.add.staticGroup();
+    generateTerrain(this);
 
-    // Create a simple dungeon room
-    const wallColor = 0x888888;
+    // Create Worms
+    let worm1 = createWorm(this, 200, 100, 0xff0000); // Red worm
+    let worm2 = createWorm(this, 600, 100, 0x0000ff); // Blue worm
 
-    // Top wall
-    let wallTop = this.add.rectangle(400, 50, 700, 20, wallColor);
-    walls.add(wallTop);
+    worms.push(worm1);
+    worms.push(worm2);
 
-    // Bottom wall
-    let wallBottom = this.add.rectangle(400, 550, 700, 20, wallColor);
-    walls.add(wallBottom);
+    this.physics.add.collider(worms, terrainGroup);
 
-    // Left wall
-    let wallLeft = this.add.rectangle(50, 300, 20, 500, wallColor);
-    walls.add(wallLeft);
+    // UI
+    turnText = this.add.text(config.width / 2, 20, "Player 1's Turn", { font: '24px Arial', fill: '#000' }).setOrigin(0.5).setDepth(100);
 
-    // Right wall
-    let wallRight = this.add.rectangle(750, 300, 20, 500, wallColor);
-    walls.add(wallRight);
+    healthTexts.push(this.add.text(50, 20, "P1 Health: 100", { font: '20px Arial', fill: '#f00' }).setDepth(100));
+    healthTexts.push(this.add.text(config.width - 200, 20, "P2 Health: 100", { font: '20px Arial', fill: '#00f' }).setDepth(100));
 
-    // Obstacle inside the room
-    let obstacle = this.add.rectangle(400, 300, 100, 100, wallColor);
-    walls.add(obstacle);
+    powerText = this.add.text(config.width / 2, 50, "Power: 0", { font: '20px Arial', fill: '#000' }).setOrigin(0.5).setDepth(100);
 
-    // Basic setup for the first scene
-    this.add.text(10, 10, 'Fate Web - Prototype (Click to move)', { font: '16px Arial', fill: '#ffffff' }).setDepth(100);
-
-    // Create the player (a simple circle for now)
-    // Start slightly offset to avoid the middle obstacle
-    player = this.add.circle(200, 300, 16, 0x00ff00);
-    this.physics.add.existing(player);
-    player.body.setCollideWorldBounds(true);
-
-    // Add collision between player and walls
-    this.physics.add.collider(player, walls, handleWallCollision, null, this);
-
-    // Create enemies group
-    enemies = this.physics.add.group();
-
-    // Add a couple of placeholder enemies (red squares)
-    let enemy1 = this.add.rectangle(600, 150, 30, 30, 0xff0000);
-    this.physics.add.existing(enemy1);
-    enemy1.body.setImmovable(true);
-    enemy1.health = 3;
-    enemies.add(enemy1);
-
-    let enemy2 = this.add.rectangle(600, 450, 30, 30, 0xff0000);
-    this.physics.add.existing(enemy2);
-    enemy2.body.setImmovable(true);
-    enemy2.health = 3;
-    enemies.add(enemy2);
-
-    // Collision between player and enemies
-    this.physics.add.collider(player, enemies);
-
-    // Setup click listener
-    this.input.on('pointerdown', function (pointer) {
-        // Check if we clicked on an enemy
-        let clickedEnemy = false;
-
-        enemies.getChildren().forEach((enemy) => {
-            if (enemy.active) {
-                // Check if click is inside the enemy bounds (roughly)
-                const dist = Phaser.Math.Distance.Between(pointer.x, pointer.y, enemy.x, enemy.y);
-                if (dist < 20) {
-                    targetedEnemy = enemy;
-                    clickedEnemy = true;
-                }
-            }
-        });
-
-        // Set target position based on click or enemy location
-        targetPosition = new Phaser.Math.Vector2(pointer.x, pointer.y);
-        isMoving = true;
-
-        if (!clickedEnemy) {
-            targetedEnemy = null;
-        }
-
-        // Move towards target
-        this.physics.moveToObject(player, targetPosition, moveSpeed);
-    }, this);
-}
-
-function handleWallCollision() {
-    // When hitting a wall, stop moving to avoid sliding infinitely against it
-    // in a weird way with moveToObject
-    player.body.reset(player.x, player.y);
-    isMoving = false;
-    targetPosition = null;
+    // Aim Line
+    aimLine = this.add.line(0, 0, 0, 0, 50, 0, 0xffffff).setOrigin(0, 0).setDepth(50);
 }
 
 function update() {
-    // Stop moving if close enough to target
-    if (isMoving && targetPosition) {
-        let stopDistance = 4;
+    if (worms.length === 0) return;
 
-        // If we are targeting an enemy, stop when in attack range
-        if (targetedEnemy && targetedEnemy.active) {
-            const distToEnemy = Phaser.Math.Distance.Between(player.x, player.y, targetedEnemy.x, targetedEnemy.y);
-            if (distToEnemy <= attackRange) {
-                // Attack!
-                player.body.reset(player.x, player.y);
-                isMoving = false;
-                targetPosition = null;
-                attackEnemy(targetedEnemy);
-                return;
-            }
+    let currentWorm = worms[currentWormIndex];
+    if (!currentWorm || !currentWorm.active) return;
+
+    // Handle projectile in flight
+    if (projectile && projectile.active) {
+        // Stop worm movement while projectile is flying
+        currentWorm.body.setVelocityX(0);
+        return;
+    }
+
+    // Aiming
+    if (this.wKey.isDown) {
+        aimAngle -= 0.05;
+    } else if (this.sKey.isDown) {
+        aimAngle += 0.05;
+    }
+
+    // Update Aim Line Position and Angle
+    aimLine.setPosition(currentWorm.x, currentWorm.y);
+    let endX = Math.cos(aimAngle) * 50;
+    let endY = Math.sin(aimAngle) * 50;
+    aimLine.setTo(0, 0, endX, endY);
+    aimLine.setVisible(true);
+
+    // Charging and Firing
+    if (this.spacebar.isDown) {
+        isCharging = true;
+        chargePower += 15;
+        if (chargePower > maxCharge) chargePower = maxCharge;
+    } else if (isCharging && this.spacebar.isUp) {
+        fireProjectile(this, currentWorm, chargePower, aimAngle);
+        isCharging = false;
+        chargePower = 0;
+    }
+
+    powerText.setText(`Power: ${Math.floor(chargePower)}`);
+
+    // Basic Movement (Left/Right + Jump)
+    if (!isCharging) { // Can't move while charging
+        if (this.cursors.left.isDown) {
+            currentWorm.body.setVelocityX(-100);
+            aimAngle = Math.PI - Math.abs(aimAngle) * Math.sign(aimAngle); // Flip aim when moving
+            if (aimAngle > Math.PI) aimAngle -= Math.PI * 2;
+        } else if (this.cursors.right.isDown) {
+            currentWorm.body.setVelocityX(100);
+            aimAngle = Math.abs(aimAngle) < Math.PI/2 ? aimAngle : Math.PI - aimAngle;
+            if (aimAngle > Math.PI) aimAngle -= Math.PI * 2;
+        } else {
+            currentWorm.body.setVelocityX(0);
         }
 
-        const distance = Phaser.Math.Distance.Between(player.x, player.y, targetPosition.x, targetPosition.y);
-
-        // If close enough to ground target, stop
-        if (distance < stopDistance) {
-            player.body.reset(targetPosition.x, targetPosition.y);
-            isMoving = false;
-            targetPosition = null;
+        if (this.cursors.up.isDown && currentWorm.body.touching.down) {
+            currentWorm.body.setVelocityY(-350);
         }
     }
 }
 
-function attackEnemy(enemy) {
-    if (!enemy || !enemy.active) return;
+function fireProjectile(scene, worm, power, angle) {
+    aimLine.setVisible(false);
 
-    enemy.health -= 1;
+    projectile = scene.add.circle(worm.x, worm.y, 5, 0x000000);
+    scene.physics.add.existing(projectile);
 
-    // Flash white to show damage
-    enemy.fillColor = 0xffffff;
+    let velX = Math.cos(angle) * power;
+    let velY = Math.sin(angle) * power;
 
-    // Reset color after a short delay
-    game.scene.scenes[0].time.delayedCall(100, () => {
-        if (enemy.active) {
-            enemy.fillColor = 0xff0000;
+    projectile.body.setVelocity(velX, velY);
+    projectile.body.setCollideWorldBounds(true);
+    projectile.body.onWorldBounds = true; // Trigger event on world bounds
+
+    // Projectile collides with terrain
+    scene.physics.add.collider(projectile, terrainGroup, handleExplosion, null, scene);
+
+    // Projectile collides with worms
+    scene.physics.add.collider(projectile, worms, handleExplosion, null, scene);
+
+    // Destroy projectile if it hits world bounds (e.g. falls out bottom)
+    scene.physics.world.once('worldbounds', (body) => {
+        if (body.gameObject === projectile) {
+             projectile.destroy();
+             projectile = null;
+             nextTurn();
+        }
+    });
+}
+
+function handleExplosion(proj, target) {
+    let expX = proj.x;
+    let expY = proj.y;
+    let radius = 60;
+    let maxDamage = 50;
+
+    // Visual Explosion
+    let explosion = proj.scene.add.circle(expX, expY, radius, 0xffa500, 0.7);
+    proj.scene.time.delayedCall(200, () => { explosion.destroy(); });
+
+    // Destroy Terrain
+    terrainGroup.getChildren().forEach(block => {
+        if (block.active) {
+            let dist = Phaser.Math.Distance.Between(expX, expY, block.x, block.y);
+            if (dist < radius) {
+                block.destroy();
+            }
         }
     });
 
-    if (enemy.health <= 0) {
-        // Enemy dies
-        enemy.destroy();
-        targetedEnemy = null;
+    // Damage and Knockback Worms
+    worms.forEach((w, index) => {
+        if (w.active) {
+            let dist = Phaser.Math.Distance.Between(expX, expY, w.x, w.y);
+            if (dist < radius) {
+                // Calculate damage (closer = more damage)
+                let dmg = Math.floor(maxDamage * (1 - dist / radius));
+                w.health -= dmg;
+                healthTexts[index].setText(`P${index+1} Health: ${w.health}`);
+
+                // Knockback
+                let angle = Phaser.Math.Angle.Between(expX, expY, w.x, w.y);
+                let knockbackForce = 300 * (1 - dist / radius);
+                w.body.setVelocity(Math.cos(angle) * knockbackForce, Math.sin(angle) * knockbackForce - 150);
+
+                if (w.health <= 0) {
+                    w.destroy();
+                    w.active = false;
+                }
+            }
+        }
+    });
+
+    proj.destroy();
+    projectile = null;
+
+    checkWinCondition(proj.scene);
+    if(worms.filter(w => w.active).length > 1) {
+         nextTurn();
+    }
+}
+
+function checkWinCondition(scene) {
+    let aliveWorms = worms.filter(w => w.active);
+    if (aliveWorms.length <= 1) {
+        if (aliveWorms.length === 1) {
+            let winnerIndex = worms.indexOf(aliveWorms[0]);
+            turnText.setText(`Player ${winnerIndex + 1} Wins!`);
+        } else {
+             turnText.setText(`Draw!`);
+        }
+        // Disable aiming/shooting
+        aimLine.setVisible(false);
+        scene.spacebar.isDown = false;
+    }
+}
+
+function generateTerrain(scene) {
+    const width = config.width;
+    const height = config.height;
+
+    for (let x = 0; x < width; x += blockSize) {
+        let terrainY = 300 + Math.sin(x / 100) * 100 + Math.sin(x / 50) * 30;
+
+        for (let y = height; y > terrainY; y -= blockSize) {
+            let block = scene.add.rectangle(x + blockSize/2, y - blockSize/2, blockSize, blockSize, 0x228B22);
+            scene.physics.add.existing(block, true);
+            terrainGroup.add(block);
+        }
+    }
+}
+
+function createWorm(scene, x, y, color) {
+    let worm = scene.add.rectangle(x, y, 20, 20, color);
+    scene.physics.add.existing(worm);
+    worm.body.setCollideWorldBounds(true);
+    worm.body.setBounce(0.1);
+    worm.body.setDragX(200); // Friction
+    worm.health = 100;
+    worm.color = color;
+    worm.active = true;
+    return worm;
+}
+
+function nextTurn() {
+    let startIdx = currentWormIndex;
+    do {
+        currentWormIndex = (currentWormIndex + 1) % worms.length;
+    } while (!worms[currentWormIndex].active && currentWormIndex !== startIdx);
+
+    turnText.setText(`Player ${currentWormIndex + 1}'s Turn`);
+
+    // Reset aim angle based on side
+    if (currentWormIndex === 0) {
+         aimAngle = -Math.PI / 4;
+    } else {
+         aimAngle = -Math.PI * 3/4;
     }
 }
