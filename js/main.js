@@ -30,18 +30,34 @@ let healthTexts = [];
 
 // Artillery Mechanics
 let aimAngle = -Math.PI / 4; // Default aim up-right 45 deg
-let aimLine;
+let aimGraphics; // Replacing aimLine with a dotted graphics arc
 let chargePower = 0;
 let isCharging = false;
 let maxCharge = 1000;
 let projectile = null;
-let powerText;
+let powerBar;
+let powerBarBg;
+let cloudGroup;
 
 function preload() {
     // Load assets here later
 }
 
 function create() {
+    // Sky Gradient
+    let bg = this.add.graphics();
+    bg.fillGradientStyle(0x1e90ff, 0x1e90ff, 0x87ceeb, 0x87ceeb, 1);
+    bg.fillRect(0, 0, 800, 600);
+    bg.setDepth(-10);
+
+    // Clouds
+    cloudGroup = this.add.group();
+    for(let i=0; i<5; i++) {
+        let cx = Phaser.Math.Between(0, 800);
+        let cy = Phaser.Math.Between(50, 250);
+        createCloud(this, cx, cy);
+    }
+
     // Setup inputs
     this.cursors = this.input.keyboard.createCursorKeys();
     this.spacebar = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
@@ -60,16 +76,42 @@ function create() {
 
     this.physics.add.collider(worms, terrainGroup);
 
-    // UI
-    turnText = this.add.text(config.width / 2, 20, "Player 1's Turn", { font: '24px Arial', fill: '#000' }).setOrigin(0.5).setDepth(100);
+    // UI Panels
+    let uiBg = this.add.graphics();
+    uiBg.fillStyle(0x000000, 0.4);
+    uiBg.fillRoundedRect(10, 10, 780, 50, 10);
+    uiBg.setDepth(99);
 
-    healthTexts.push(this.add.text(50, 20, "P1 Health: 100", { font: '20px Arial', fill: '#f00' }).setDepth(100));
-    healthTexts.push(this.add.text(config.width - 200, 20, "P2 Health: 100", { font: '20px Arial', fill: '#00f' }).setDepth(100));
+    turnText = this.add.text(config.width / 2, 25, "Player 1's Turn", { font: 'bold 24px Arial', fill: '#ffcc00', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5).setDepth(100);
 
-    powerText = this.add.text(config.width / 2, 50, "Power: 0", { font: '20px Arial', fill: '#000' }).setOrigin(0.5).setDepth(100);
+    healthTexts.push(this.add.text(30, 25, "P1 HP: 100", { font: 'bold 20px Arial', fill: '#ff6666', stroke: '#000', strokeThickness: 3 }).setOrigin(0, 0.5).setDepth(100));
+    healthTexts.push(this.add.text(config.width - 30, 25, "P2 HP: 100", { font: 'bold 20px Arial', fill: '#6666ff', stroke: '#000', strokeThickness: 3 }).setOrigin(1, 0.5).setDepth(100));
 
-    // Aim Line
-    aimLine = this.add.line(0, 0, 0, 0, 50, 0, 0xffffff).setOrigin(0, 0).setDepth(50);
+    // Power Bar UI
+    powerBarBg = this.add.rectangle(config.width / 2, 70, 200, 15, 0x000000).setDepth(100).setOrigin(0.5);
+    powerBar = this.add.rectangle(config.width / 2 - 100, 70, 0, 15, 0xff0000).setDepth(101).setOrigin(0, 0.5);
+
+    // Aim Graphics (Dotted Line)
+    aimGraphics = this.add.graphics().setDepth(50);
+}
+
+function createCloud(scene, x, y) {
+    let cloud = scene.add.graphics();
+    cloud.fillStyle(0xffffff, 0.8);
+    cloud.fillCircle(x, y, 30);
+    cloud.fillCircle(x - 20, y + 10, 20);
+    cloud.fillCircle(x + 20, y + 10, 25);
+    cloud.fillCircle(x, y + 15, 25);
+
+    // Simple drift animation
+    scene.tweens.add({
+        targets: cloud,
+        x: x + 100,
+        duration: Phaser.Math.Between(15000, 25000),
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+    });
 }
 
 function update() {
@@ -92,17 +134,19 @@ function update() {
         aimAngle += 0.05;
     }
 
-    // Update Aim Line Position and Angle
-    aimLine.setPosition(currentWorm.x, currentWorm.y);
-    let endX = Math.cos(aimAngle) * 50;
-    let endY = Math.sin(aimAngle) * 50;
-    aimLine.setTo(0, 0, endX, endY);
-    aimLine.setVisible(true);
+    // Update Aim Dotted Line
+    aimGraphics.clear();
+    aimGraphics.fillStyle(0xffffff, 1);
+    for(let i = 1; i <= 5; i++) {
+        let dotX = currentWorm.x + Math.cos(aimAngle) * (15 * i);
+        let dotY = currentWorm.y + Math.sin(aimAngle) * (15 * i);
+        aimGraphics.fillCircle(dotX, dotY, 3);
+    }
 
     // Charging and Firing
     if (this.spacebar.isDown) {
         isCharging = true;
-        chargePower += 15;
+        chargePower += 20;
         if (chargePower > maxCharge) chargePower = maxCharge;
     } else if (isCharging && this.spacebar.isUp) {
         fireProjectile(this, currentWorm, chargePower, aimAngle);
@@ -110,7 +154,18 @@ function update() {
         chargePower = 0;
     }
 
-    powerText.setText(`Power: ${Math.floor(chargePower)}`);
+    // Update Power Bar
+    let powerRatio = chargePower / maxCharge;
+    powerBar.width = 200 * powerRatio;
+
+    // Color gradient for power bar
+    if (powerRatio < 0.5) {
+        powerBar.fillColor = 0xffff00; // Yellow
+    } else if (powerRatio < 0.8) {
+        powerBar.fillColor = 0xff8800; // Orange
+    } else {
+        powerBar.fillColor = 0xff0000; // Red
+    }
 
     // Basic Movement (Left/Right + Jump)
     if (!isCharging) { // Can't move while charging
@@ -118,10 +173,12 @@ function update() {
             currentWorm.body.setVelocityX(-100);
             aimAngle = Math.PI - Math.abs(aimAngle) * Math.sign(aimAngle); // Flip aim when moving
             if (aimAngle > Math.PI) aimAngle -= Math.PI * 2;
+            currentWorm.setFlipX(true); // Face left
         } else if (this.cursors.right.isDown) {
             currentWorm.body.setVelocityX(100);
             aimAngle = Math.abs(aimAngle) < Math.PI/2 ? aimAngle : Math.PI - aimAngle;
             if (aimAngle > Math.PI) aimAngle -= Math.PI * 2;
+            currentWorm.setFlipX(false); // Face right
         } else {
             currentWorm.body.setVelocityX(0);
         }
@@ -133,9 +190,10 @@ function update() {
 }
 
 function fireProjectile(scene, worm, power, angle) {
-    aimLine.setVisible(false);
+    aimGraphics.clear();
 
-    projectile = scene.add.circle(worm.x, worm.y, 5, 0x000000);
+    projectile = scene.add.circle(worm.x, worm.y, 6, 0x333333);
+    projectile.setStrokeStyle(2, 0x000000); // Add outline to projectile
     scene.physics.add.existing(projectile);
 
     let velX = Math.cos(angle) * power;
@@ -167,19 +225,46 @@ function handleExplosion(proj, target) {
     let radius = 60;
     let maxDamage = 50;
 
-    // Visual Explosion
-    let explosion = proj.scene.add.circle(expX, expY, radius, 0xffa500, 0.7);
-    proj.scene.time.delayedCall(200, () => { explosion.destroy(); });
+    // Enhanced Visual Explosion
+    let explosionCore = proj.scene.add.circle(expX, expY, 5, 0xffffff, 1);
+    let explosionFire = proj.scene.add.circle(expX, expY, 15, 0xff8800, 0.8);
+    let explosionSmoke = proj.scene.add.circle(expX, expY, 20, 0x333333, 0.6);
+
+    proj.scene.tweens.add({
+        targets: explosionCore,
+        radius: radius * 0.4,
+        alpha: 0,
+        duration: 200,
+        onComplete: () => explosionCore.destroy()
+    });
+
+    proj.scene.tweens.add({
+        targets: explosionFire,
+        radius: radius * 0.8,
+        alpha: 0,
+        duration: 300,
+        onComplete: () => explosionFire.destroy()
+    });
+
+    proj.scene.tweens.add({
+        targets: explosionSmoke,
+        radius: radius,
+        alpha: 0,
+        duration: 500,
+        onComplete: () => explosionSmoke.destroy()
+    });
 
     // Destroy Terrain
-    terrainGroup.getChildren().forEach(block => {
+    // Iterate over a copy of the children array to avoid skipping elements when destroying them
+    const blocksToDestroy = terrainGroup.getChildren().filter(block => {
         if (block.active) {
             let dist = Phaser.Math.Distance.Between(expX, expY, block.x, block.y);
-            if (dist < radius) {
-                block.destroy();
-            }
+            return dist < radius;
         }
+        return false;
     });
+
+    blocksToDestroy.forEach(block => block.destroy());
 
     // Damage and Knockback Worms
     worms.forEach((w, index) => {
@@ -189,7 +274,7 @@ function handleExplosion(proj, target) {
                 // Calculate damage (closer = more damage)
                 let dmg = Math.floor(maxDamage * (1 - dist / radius));
                 w.health -= dmg;
-                healthTexts[index].setText(`P${index+1} Health: ${w.health}`);
+                healthTexts[index].setText(`P${index+1} HP: ${Math.max(0, w.health)}`);
 
                 // Knockback
                 let angle = Phaser.Math.Angle.Between(expX, expY, w.x, w.y);
@@ -223,7 +308,7 @@ function checkWinCondition(scene) {
              turnText.setText(`Draw!`);
         }
         // Disable aiming/shooting
-        aimLine.setVisible(false);
+        aimGraphics.clear();
         scene.spacebar.isDown = false;
     }
 }
@@ -235,8 +320,18 @@ function generateTerrain(scene) {
     for (let x = 0; x < width; x += blockSize) {
         let terrainY = 300 + Math.sin(x / 100) * 100 + Math.sin(x / 50) * 30;
 
-        for (let y = height; y > terrainY; y -= blockSize) {
-            let block = scene.add.rectangle(x + blockSize/2, y - blockSize/2, blockSize, blockSize, 0x228B22);
+        // Ensure terrainY is aligned to grid for clean top edge
+        terrainY = Math.floor(terrainY / blockSize) * blockSize;
+
+        for (let y = terrainY; y < height; y += blockSize) {
+            // Give dirt color to lower blocks, grass color to top
+            let isTop = (y === terrainY);
+            let color = isTop ? 0x3CB371 : 0x8B4513; // Medium Sea Green / Saddle Brown
+
+            let block = scene.add.rectangle(x + blockSize/2, y + blockSize/2, blockSize, blockSize, color);
+            // Slight border to make blocks look better
+            block.setStrokeStyle(1, 0x000000, 0.2);
+
             scene.physics.add.existing(block, true);
             terrainGroup.add(block);
         }
@@ -244,15 +339,40 @@ function generateTerrain(scene) {
 }
 
 function createWorm(scene, x, y, color) {
-    let worm = scene.add.rectangle(x, y, 20, 20, color);
-    scene.physics.add.existing(worm);
-    worm.body.setCollideWorldBounds(true);
-    worm.body.setBounce(0.1);
-    worm.body.setDragX(200); // Friction
-    worm.health = 100;
-    worm.color = color;
-    worm.active = true;
-    return worm;
+    // Creating a more "worm-like" look using a container
+    let wormContainer = scene.add.container(x, y);
+    wormContainer.setSize(20, 20);
+    scene.physics.add.existing(wormContainer);
+
+    // Body
+    let bodyGraphics = scene.add.graphics();
+    bodyGraphics.fillStyle(color, 1);
+    bodyGraphics.fillRoundedRect(-10, -10, 20, 20, 8); // Pill/rounded square shape
+    bodyGraphics.lineStyle(2, 0x000000, 1);
+    bodyGraphics.strokeRoundedRect(-10, -10, 20, 20, 8);
+    wormContainer.add(bodyGraphics);
+
+    // Eyes
+    let eyeWhite = scene.add.circle(4, -2, 4, 0xffffff);
+    let eyePupil = scene.add.circle(5, -2, 2, 0x000000);
+    wormContainer.add([eyeWhite, eyePupil]);
+
+    wormContainer.body.setCollideWorldBounds(true);
+    wormContainer.body.setBounce(0.1);
+    wormContainer.body.setDragX(200); // Friction
+
+    // Properties
+    wormContainer.health = 100;
+    wormContainer.color = color;
+    wormContainer.active = true;
+
+    // Helper method to flip sprite
+    wormContainer.setFlipX = function(flip) {
+        // Simple way to flip the container visually
+        this.scaleX = flip ? -1 : 1;
+    };
+
+    return wormContainer;
 }
 
 function nextTurn() {
@@ -263,10 +383,13 @@ function nextTurn() {
 
     turnText.setText(`Player ${currentWormIndex + 1}'s Turn`);
 
-    // Reset aim angle based on side
+    // Reset aim angle and facing direction based on side
+    let currentWorm = worms[currentWormIndex];
     if (currentWormIndex === 0) {
          aimAngle = -Math.PI / 4;
+         if (currentWorm) currentWorm.setFlipX(false);
     } else {
          aimAngle = -Math.PI * 3/4;
+         if (currentWorm) currentWorm.setFlipX(true);
     }
 }
